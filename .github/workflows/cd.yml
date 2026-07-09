@@ -58,7 +58,9 @@ jobs:
         run: ./scripts/mlflow_server.sh stop
 
       - name: Push registry state
-        run: ./scripts/registry_push.sh "cd: register models from ${GITHUB_SHA::7}"
+        run: >
+          ./scripts/registry_push.sh
+          "cd: register models from ${GITHUB_SHA::7}"
 
       - name: Show server log on failure
         if: failure()

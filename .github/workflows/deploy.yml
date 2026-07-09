@@ -48,7 +48,9 @@ jobs:
         run: ./scripts/mlflow_server.sh stop
 
       - name: Push registry state
-        run: ./scripts/registry_push.sh "deploy: ${{ inputs.model }} to staging"
+        run: >
+          ./scripts/registry_push.sh
+          "deploy: ${{ inputs.model }} to staging"
 
       - name: Show server log on failure
         if: failure()
@@ -90,7 +92,9 @@ jobs:
         run: ./scripts/mlflow_server.sh stop
 
       - name: Push registry state
-        run: ./scripts/registry_push.sh "deploy: ${{ inputs.model }} to production"
+        run: >
+          ./scripts/registry_push.sh
+          "deploy: ${{ inputs.model }} to production"
 
       - name: Show server log on failure
         if: failure()
