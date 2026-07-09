@@ -11,11 +11,9 @@ mlruns-dev/
 mlruns/
 mlflow.db
 
-# Shared registry checkout (worktree of the mlflow-registry branch)
-registry/
-
 # Outputs
 metrics/
+deployments/
 *.log
 mlflow-server.log
 .mlflow-server.pid

@@ -1,4 +1,4 @@
-.PHONY: install lint test train train-all mlflow-up mlflow-down registry-pull deploy-staging deploy-production notebook
+.PHONY: install lint test train train-all mlflow-up mlflow-down azure-uri deploy-staging deploy-production notebook
 
 CONFIG ?= configs/housing_xgb.yaml
 CONFIGS := configs/housing_ridge.yaml configs/housing_xgb.yaml configs/cancer_logreg.yaml configs/cancer_xgb.yaml
@@ -13,13 +13,17 @@ lint:
 test:
 	uv run pytest
 
-# Dev server (throwaway store) on :5000; shared registry server on :5001.
-# Usage: `make mlflow-up DEV=1` for dev, `make mlflow-up` for the registry checkout.
+# Local throwaway MLflow for offline play; the real registry is Azure ML.
 mlflow-up:
-	./scripts/mlflow_server.sh start $(if $(DEV),dev,registry)
+	./scripts/mlflow_server.sh start
 
 mlflow-down:
 	./scripts/mlflow_server.sh stop
+
+# Print the Azure ML workspace tracking URI (export it before train/deploy):
+#   export MLFLOW_TRACKING_URI=$$(make -s azure-uri)
+azure-uri:
+	@az ml workspace show -n mlops-lab-ws -g mlops-lab-rg --query mlflow_tracking_uri -o tsv
 
 train:
 	uv run mlops train --config $(CONFIG)
@@ -27,16 +31,12 @@ train:
 train-all:
 	for c in $(CONFIGS); do uv run mlops train --config $$c || exit 1; done
 
-# Fetch the shared registry branch into ./registry for local inspection (read-only)
-registry-pull:
-	./scripts/registry_checkout.sh
-
 deploy-staging:
-	uv run mlops deploy --model $(MODEL) --alias staging --env staging
+	uv run mlops deploy --model $(MODEL) --stage staging --env staging
 
 deploy-production:
-	uv run mlops promote --model $(MODEL) --from-alias staging --to-alias production
-	uv run mlops deploy --model $(MODEL) --alias production --env production
+	uv run mlops promote --model $(MODEL)
+	uv run mlops deploy --model $(MODEL) --stage production --env production
 
 notebook:
 	uv run jupyter lab

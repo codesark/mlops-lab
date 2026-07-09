@@ -12,10 +12,12 @@ on:
           - cancer-classifier
 
 permissions:
-  contents: write
+  contents: read
+  id-token: write # OIDC federated login to Azure
 
+# Serialize promotions so two deploys can't race a stage tag.
 concurrency:
-  group: mlflow-registry
+  group: model-promotion
   cancel-in-progress: false
 
 jobs:
@@ -23,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     env:
-      MLFLOW_TRACKING_URI: http://127.0.0.1:5001
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -31,30 +33,25 @@ jobs:
           enable-cache: true
       - run: uv sync
 
-      - name: Checkout shared registry
-        run: >
-          ./scripts/registry_checkout.sh
-          "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Start MLflow server
-        run: ./scripts/mlflow_server.sh start registry
+      - name: Auth preflight
+        run: az account show --query name -o tsv
 
-      - name: Deploy @staging model to staging (mock)
+      - name: Deploy staging-tagged model to staging (mock)
         run: >
-          uv run mlops deploy --model "${{ inputs.model }}" --alias staging --env staging
+          uv run mlops deploy --model "${{ inputs.model }}" --stage staging --env staging
           --actor "${{ github.actor }}" --git-sha "${GITHUB_SHA::7}"
 
-      - name: Stop MLflow server
-        run: ./scripts/mlflow_server.sh stop
-
-      - name: Push registry state
-        run: >
-          ./scripts/registry_push.sh
-          "deploy: ${{ inputs.model }} to staging"
-
-      - name: Show server log on failure
-        if: failure()
-        run: cat mlflow-server.log || true
+      - name: Upload deployment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-staging-${{ inputs.model }}
+          path: deployments/
 
   # Pauses here until the required reviewer on the `production` environment
   # approves — the "manager sign-off" step of the lab.
@@ -63,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      MLFLOW_TRACKING_URI: http://127.0.0.1:5001
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -71,31 +68,25 @@ jobs:
           enable-cache: true
       - run: uv sync
 
-      # Fresh checkout: picks up the staging manifest the previous job pushed.
-      - name: Checkout shared registry
-        run: >
-          ./scripts/registry_checkout.sh
-          "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Start MLflow server
-        run: ./scripts/mlflow_server.sh start registry
+      - name: Auth preflight
+        run: az account show --query name -o tsv
 
-      - name: Promote @staging -> @production
+      - name: Promote staging -> production
         run: uv run mlops promote --model "${{ inputs.model }}"
 
-      - name: Deploy @production model to production (mock)
+      - name: Deploy production-tagged model to production (mock)
         run: >
-          uv run mlops deploy --model "${{ inputs.model }}" --alias production --env production
+          uv run mlops deploy --model "${{ inputs.model }}" --stage production --env production
           --actor "${{ github.actor }}" --git-sha "${GITHUB_SHA::7}"
 
-      - name: Stop MLflow server
-        run: ./scripts/mlflow_server.sh stop
-
-      - name: Push registry state
-        run: >
-          ./scripts/registry_push.sh
-          "deploy: ${{ inputs.model }} to production"
-
-      - name: Show server log on failure
-        if: failure()
-        run: cat mlflow-server.log || true
+      - name: Upload deployment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-production-${{ inputs.model }}
+          path: deployments/

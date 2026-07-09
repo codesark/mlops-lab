@@ -5,7 +5,12 @@ description = "MLOps lab: notebook -> package -> CI gates -> MLflow registry -> 
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "mlflow>=3.1",
+    # Azure ML's MLflow backend does not support MLflow 3.x (no logged-models
+    # endpoints); mlflow-skinny must match exactly or uv resolves a 3.x skinny
+    # from azureml-mlflow and clobbers the mlflow package.
+    "mlflow==2.22.5",
+    "mlflow-skinny==2.22.5",
+    "azureml-mlflow==1.62.0.post5",
     "scikit-learn>=1.5",
     "xgboost>=2.1",
     "pandas>=2.2",
