@@ -1,0 +1,65 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "notebooks/**"
+      - "**.md"
+
+permissions:
+  contents: write
+
+# All registry writers share this group so the sqlite state is never
+# written concurrently. Queued, never cancelled.
+concurrency:
+  group: mlflow-registry
+  cancel-in-progress: false
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    env:
+      MLFLOW_TRACKING_URI: http://127.0.0.1:5001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - name: Checkout shared registry (bootstrap if missing)
+        run: >
+          ./scripts/registry_checkout.sh
+          "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+
+      - name: Start MLflow server
+        run: ./scripts/mlflow_server.sh start registry
+
+      - name: Train all candidates
+        run: |
+          for c in configs/*.yaml; do
+            uv run mlops train --config "$c"
+          done
+
+      - name: Check absolute gates (safety net)
+        run: |
+          for c in configs/*.yaml; do
+            uv run mlops evaluate --config "$c"
+          done
+
+      - name: Register best candidates -> @staging
+        run: |
+          uv run mlops register --model housing-price --git-sha "${GITHUB_SHA::7}"
+          uv run mlops register --model cancer-classifier --git-sha "${GITHUB_SHA::7}"
+
+      # Stop the server before committing so the sqlite file is fully flushed.
+      - name: Stop MLflow server
+        run: ./scripts/mlflow_server.sh stop
+
+      - name: Push registry state
+        run: ./scripts/registry_push.sh "cd: register models from ${GITHUB_SHA::7}"
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat mlflow-server.log || true

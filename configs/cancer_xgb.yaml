@@ -1,0 +1,21 @@
+name: cancer_xgb
+task: classification
+dataset: breast_cancer
+registered_model: cancer-classifier
+split: {test_size: 0.2, seed: 42}
+model:
+  type: xgboost.XGBClassifier
+  params:
+    n_estimators: 200
+    max_depth: 4
+    learning_rate: 0.1
+    tree_method: hist
+    random_state: 42
+    n_jobs: 2
+gates:
+  f1: {min: 0.95}
+  roc_auc: {min: 0.98}
+champion:
+  primary_metric: f1
+  direction: maximize
+  tolerance: 0.01

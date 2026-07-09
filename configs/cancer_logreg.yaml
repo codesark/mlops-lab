@@ -1,0 +1,15 @@
+name: cancer_logreg
+task: classification
+dataset: breast_cancer
+registered_model: cancer-classifier
+split: {test_size: 0.2, seed: 42}
+model:
+  type: sklearn.LogisticRegression
+  params: {C: 1.0, max_iter: 5000, random_state: 42}
+gates:
+  f1: {min: 0.95}
+  roc_auc: {min: 0.98}
+champion:
+  primary_metric: f1
+  direction: maximize
+  tolerance: 0.01

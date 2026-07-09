@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+
+# MLflow local dev store (throwaway, per-developer)
+mlflow-dev.db
+mlruns-dev/
+mlruns/
+mlflow.db
+
+# Shared registry checkout (worktree of the mlflow-registry branch)
+registry/
+
+# Outputs
+metrics/
+*.log
+mlflow-server.log
+.mlflow-server.pid
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store

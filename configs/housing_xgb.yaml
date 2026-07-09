@@ -1,0 +1,21 @@
+name: housing_xgb
+task: regression
+dataset: california_housing
+registered_model: housing-price
+split: {test_size: 0.2, seed: 42}
+model:
+  type: xgboost.XGBRegressor
+  params:
+    n_estimators: 300
+    max_depth: 6
+    learning_rate: 0.05
+    tree_method: hist
+    random_state: 42
+    n_jobs: 2
+gates:
+  rmse: {max: 0.55}
+  r2: {min: 0.78}
+champion:
+  primary_metric: rmse
+  direction: minimize
+  tolerance: 0.02

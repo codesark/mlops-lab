@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest
+
+  train-gate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [housing_ridge, housing_xgb, cancer_logreg, cancer_xgb]
+    env:
+      MLFLOW_TRACKING_URI: http://127.0.0.1:5001
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      # Read-only view of the shared registry: PRs compare against the
+      # @production champion but never write registry state.
+      - name: Checkout shared registry
+        run: >
+          ./scripts/registry_checkout.sh
+          "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          --read-only
+
+      - name: Start MLflow server
+        run: ./scripts/mlflow_server.sh start registry
+
+      - name: Train candidate
+        run: uv run mlops train --config configs/${{ matrix.config }}.yaml
+
+      - name: Evaluate gates + champion comparison
+        id: gate
+        continue-on-error: true
+        run: >
+          uv run mlops evaluate --config configs/${{ matrix.config }}.yaml
+          --champion-from-registry --output-md report.md
+
+      - name: Publish job summary
+        if: always()
+        run: '[ -f report.md ] && cat report.md >> "$GITHUB_STEP_SUMMARY" || true'
+
+      - name: Post sticky PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          [ -f report.md ] &&
+          ./scripts/pr_comment.sh "${{ matrix.config }}" report.md
+          "${{ github.event.pull_request.number }}" || true
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat mlflow-server.log || true
+
+      - name: Fail job if gates failed
+        if: steps.gate.outcome == 'failure'
+        run: exit 1

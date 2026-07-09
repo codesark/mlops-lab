@@ -1,0 +1,15 @@
+name: housing_ridge
+task: regression
+dataset: california_housing
+registered_model: housing-price
+split: {test_size: 0.2, seed: 42}
+model:
+  type: sklearn.Ridge
+  params: {alpha: 1.0, random_state: 42}
+gates:
+  rmse: {max: 0.80}
+  r2: {min: 0.55}
+champion:
+  primary_metric: rmse
+  direction: minimize
+  tolerance: 0.02
