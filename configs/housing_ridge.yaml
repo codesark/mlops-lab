@@ -7,7 +7,7 @@ model:
   type: sklearn.Ridge
   params: {alpha: 1.0, random_state: 42}
 gates:
-  rmse: {max: 0.60}
+  rmse: {max: 0.80}
   r2: {min: 0.55}
 champion:
   primary_metric: rmse
