@@ -45,11 +45,12 @@ def run_training(cfg: ModelConfig) -> TrainResult:
         metrics = compute_metrics(cfg.task, splits.y_test, y_pred, y_proba)
         mlflow.log_metrics(metrics)
 
+        # MLflow 2.x API (artifact_path, not name=): Azure ML doesn't implement
+        # the MLflow 3 logged-models endpoints.
         model_info = mlflow.sklearn.log_model(
             pipeline,
-            name="model",
+            artifact_path="model",
             input_example=splits.X_train.head(5),
-            # skops (the 3.x default) rejects xgboost estimators as untrusted types
             serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
         )
     return TrainResult(

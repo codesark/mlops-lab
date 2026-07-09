@@ -11,7 +11,7 @@ from mlops_lab.config import Direction, ModelConfig, load_config
 from mlops_lab.deploy import mock_deploy
 from mlops_lab.evaluate import ComparisonResult, GateResult, check_gates, compare_to_champion
 from mlops_lab.registry import PRODUCTION, STAGING, get_champion_metrics, register_and_stage
-from mlops_lab.registry import promote as promote_alias
+from mlops_lab.registry import promote as promote_stage
 from mlops_lab.train import run_training
 
 app = typer.Typer(help="MLOps lab pipeline commands", add_completion=False)
@@ -19,11 +19,12 @@ app = typer.Typer(help="MLOps lab pipeline commands", add_completion=False)
 
 def _require_tracking_uri() -> None:
     uri = os.environ.get("MLFLOW_TRACKING_URI", "")
-    if not uri.startswith("http"):
+    if not uri.startswith(("http", "azureml")):
         typer.echo(
-            "MLFLOW_TRACKING_URI must point at an mlflow server (http://...). "
-            "Run `make mlflow-up` and export the URI — never use a file/sqlite URI "
-            "directly, or artifact paths become machine-specific.",
+            "MLFLOW_TRACKING_URI must point at the Azure ML workspace (azureml://...) "
+            "or a local mlflow server (http://...). Get the workspace URI with:\n"
+            "  az ml workspace show -n mlops-lab-ws -g mlops-lab-rg "
+            "--query mlflow_tracking_uri -o tsv",
             err=True,
         )
         raise typer.Exit(2)
@@ -158,37 +159,37 @@ def register(
     )
     typer.echo(
         f"registered {model} v{version.version} from {best_cfg.name} "
-        f"(run {best['run_id']}) → @{STAGING}"
+        f"(run {best['run_id']}) → stage={STAGING}"
     )
 
 
 @app.command()
 def promote(
     model: str = typer.Option(...),
-    from_alias: str = typer.Option(STAGING),
-    to_alias: str = typer.Option(PRODUCTION),
+    from_stage: str = typer.Option(STAGING),
+    to_stage: str = typer.Option(PRODUCTION),
 ) -> None:
-    """Reassign an alias, e.g. @staging version becomes @production."""
+    """Move a stage tag, e.g. the staging version becomes production."""
     _require_tracking_uri()
-    version = promote_alias(MlflowClient(), model, from_alias, to_alias)
-    typer.echo(f"promoted {model} v{version.version}: @{from_alias} → @{to_alias}")
+    version = promote_stage(MlflowClient(), model, from_stage, to_stage)
+    typer.echo(f"promoted {model} v{version.version}: {from_stage} → {to_stage}")
 
 
 @app.command()
 def deploy(
     model: str = typer.Option(...),
-    alias: str = typer.Option(STAGING),
+    stage: str = typer.Option(STAGING),
     env: str = typer.Option(...),
-    registry_root: Path = typer.Option(Path("registry")),
+    out_dir: Path = typer.Option(Path("deployments")),
     actor: str = typer.Option(None),
     git_sha: str = typer.Option(None),
 ) -> None:
-    """Mock-deploy a registry model to an environment: smoke test + manifest + history."""
+    """Mock-deploy a registry model to an environment: smoke test + manifest + Studio tags."""
     _require_tracking_uri()
-    manifest = mock_deploy(model, alias, env, registry_root, actor=actor, git_sha=git_sha)
+    manifest = mock_deploy(model, stage, env, out_dir, actor=actor, git_sha=git_sha)
     typer.echo(
-        f"deployed {model} v{manifest['version']} (@{alias}) to {env}; "
-        f"manifest at {registry_root}/deployments/{env}/latest.json"
+        f"deployed {model} v{manifest['version']} (stage={stage}) to {env}; "
+        f"manifest at {out_dir}/{env}/latest.json"
     )
 
 
