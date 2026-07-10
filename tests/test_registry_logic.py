@@ -9,6 +9,7 @@ from mlops_lab.registry import (
     get_stage_version,
     metrics_from_tags,
     promote,
+    rollback,
 )
 
 
@@ -90,3 +91,47 @@ def test_promote_without_staging_raises():
     client = client_with_versions(make_version({}, version="1"))
     with pytest.raises(ValueError, match="staging"):
         promote(client, "housing-price", "staging", "production")
+
+
+class TestRollback:
+    def test_moves_production_tag_and_stamps_audit(self):
+        old_good = make_version({}, version="1")
+        current = make_version({STAGE_TAG: "production"}, version="2")
+        client = client_with_versions(old_good, current)
+        client.get_model_version.return_value = old_good
+
+        rolled = rollback(client, "housing-price", "1", actor="manager", reason="latency spike")
+
+        assert rolled.version == "1"
+        client.delete_model_version_tag.assert_called_once_with("housing-price", "2", STAGE_TAG)
+        tag_calls = client.set_model_version_tag.call_args_list
+        assert call("housing-price", "1", STAGE_TAG, "production") in tag_calls
+        assert call("housing-price", "1", "rollback.from", "2") in tag_calls
+        assert call("housing-price", "1", "rollback.by", "manager") in tag_calls
+        assert call("housing-price", "1", "rollback.reason", "latency spike") in tag_calls
+
+    def test_rejects_rollback_to_current_production(self):
+        current = make_version({STAGE_TAG: "production"}, version="2")
+        client = client_with_versions(current)
+        client.get_model_version.return_value = current
+        with pytest.raises(ValueError, match="already production"):
+            rollback(client, "housing-price", "2")
+
+    def test_missing_target_version_propagates(self):
+        client = client_with_versions()
+        client.get_model_version.side_effect = MlflowException("version not found")
+        with pytest.raises(MlflowException):
+            rollback(client, "housing-price", "99")
+
+    def test_rollback_with_no_current_production(self):
+        target = make_version({}, version="1")
+        client = client_with_versions(target)
+        client.get_model_version.return_value = target
+
+        rollback(client, "housing-price", "1")
+
+        client.delete_model_version_tag.assert_not_called()
+        assert (
+            call("housing-price", "1", "rollback.from", "none")
+            in client.set_model_version_tag.call_args_list
+        )

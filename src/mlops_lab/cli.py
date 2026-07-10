@@ -12,6 +12,7 @@ from mlops_lab.deploy import mock_deploy
 from mlops_lab.evaluate import ComparisonResult, GateResult, check_gates, compare_to_champion
 from mlops_lab.registry import PRODUCTION, STAGING, get_champion_metrics, register_and_stage
 from mlops_lab.registry import promote as promote_stage
+from mlops_lab.registry import rollback as rollback_stage
 from mlops_lab.train import run_training
 
 app = typer.Typer(help="MLOps lab pipeline commands", add_completion=False)
@@ -173,6 +174,19 @@ def promote(
     _require_tracking_uri()
     version = promote_stage(MlflowClient(), model, from_stage, to_stage)
     typer.echo(f"promoted {model} v{version.version}: {from_stage} → {to_stage}")
+
+
+@app.command()
+def rollback(
+    model: str = typer.Option(...),
+    to_version: str = typer.Option(..., help="Registry version number to make production again"),
+    reason: str = typer.Option(None, help="Why this rollback is happening (kept as a tag)"),
+    actor: str = typer.Option(None),
+) -> None:
+    """Move the production stage back to an earlier version. Pointer move — no retraining."""
+    _require_tracking_uri()
+    version = rollback_stage(MlflowClient(), model, to_version, actor=actor, reason=reason)
+    typer.echo(f"rolled back {model}: production → v{version.version}")
 
 
 @app.command()

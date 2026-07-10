@@ -1,0 +1,70 @@
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Registered model to roll back"
+        type: choice
+        required: true
+        options:
+          - housing-price
+          - cancer-classifier
+      version:
+        description: "Registry version number to make production again"
+        type: string
+        required: true
+      reason:
+        description: "Why this rollback is happening"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC federated login to Azure
+
+# Same group as Deploy: a rollback can't race a promotion.
+concurrency:
+  group: model-promotion
+  cancel-in-progress: false
+
+jobs:
+  # Same governance as promotion: pauses for the production environment reviewer.
+  rollback-production:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      MLFLOW_TRACKING_URI: ${{ vars.MLFLOW_TRACKING_URI }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Auth preflight
+        run: az account show --query name -o tsv
+
+      - name: Move production stage back
+        run: >
+          uv run mlops rollback --model "${{ inputs.model }}"
+          --to-version "${{ inputs.version }}"
+          --reason "${{ inputs.reason }}"
+          --actor "${{ github.actor }}"
+
+      - name: Redeploy production (mock)
+        run: >
+          uv run mlops deploy --model "${{ inputs.model }}" --stage production --env production
+          --actor "${{ github.actor }}" --git-sha "${GITHUB_SHA::7}"
+
+      - name: Upload deployment manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: manifest-rollback-${{ inputs.model }}-v${{ inputs.version }}
+          path: deployments/

@@ -7,6 +7,8 @@ tag, resolved client-side. Champion metrics are duplicated into model-version ta
 (``metric.<name>``) so PR-time comparison needs no artifact loading.
 """
 
+from datetime import UTC, datetime
+
 import mlflow
 from mlflow import MlflowClient
 from mlflow.entities.model_registry import ModelVersion
@@ -86,3 +88,35 @@ def promote(client: MlflowClient, model_name: str, from_stage: str, to_stage: st
         raise ValueError(f"no version of {model_name!r} is tagged {STAGE_TAG}={from_stage!r}")
     _set_stage(client, model_name, version.version, to_stage)
     return version
+
+
+def rollback(
+    client: MlflowClient,
+    model_name: str,
+    to_version: str,
+    actor: str | None = None,
+    reason: str | None = None,
+) -> ModelVersion:
+    """Move the production stage tag back to a specific earlier version.
+
+    Versions are immutable, so rollback is a pointer move — no retraining. The
+    rollback is stamped onto the target version as tags (who, when, from what,
+    why) so the registry itself carries the audit trail.
+    """
+    target = client.get_model_version(model_name, to_version)  # raises if missing
+    current = get_stage_version(client, model_name, PRODUCTION)
+    if current is not None and current.version == target.version:
+        raise ValueError(f"{model_name} v{to_version} is already production")
+
+    _set_stage(client, model_name, target.version, PRODUCTION)
+
+    rolled_at = datetime.now(UTC).isoformat()
+    client.set_model_version_tag(model_name, target.version, "rollback.at", rolled_at)
+    client.set_model_version_tag(
+        model_name, target.version, "rollback.from", current.version if current else "none"
+    )
+    if actor:
+        client.set_model_version_tag(model_name, target.version, "rollback.by", actor)
+    if reason:
+        client.set_model_version_tag(model_name, target.version, "rollback.reason", reason)
+    return target

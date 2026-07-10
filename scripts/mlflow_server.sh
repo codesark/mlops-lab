@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PID_FILE=.mlflow-server.pid
-PORT=5000
+PORT=5050 # not 5000: macOS ControlCenter (AirPlay) listens there
 
 start() {
   if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
