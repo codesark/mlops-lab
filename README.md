@@ -77,8 +77,10 @@ proves the package reproduces the ad-hoc experiment exactly.
 1. Edit a config (or add a new one) — e.g. bump `max_depth` in
    `configs/housing_xgb.yaml`.
 2. Open a PR. CI posts a metrics table per candidate: absolute gates plus a
-   comparison against the current production champion. A model that regresses past
-   tolerance fails the check and can't merge.
+   comparison against the current production champion. The champion comparison
+   **blocks only the candidate lineage that holds the champion** (regressing the
+   shipping model fails the check and can't merge); baseline candidates are
+   expected to be worse and compare informationally.
 3. Merge. CD registers the best gate-passing candidate and tags it `stage=staging`.
 4. Anyone runs the **Deploy** workflow (Actions → Deploy → Run workflow, pick the
    model). Staging deploys automatically; the production job waits until the

@@ -66,6 +66,7 @@ def register_and_stage(
     metrics: dict[str, float],
     dataset: str,
     git_sha: str | None = None,
+    config_name: str | None = None,
     stage: str = STAGING,
 ) -> ModelVersion:
     """Register a trained model as a new version, tag it, and move the stage tag to it."""
@@ -77,6 +78,10 @@ def register_and_stage(
     client.set_model_version_tag(model_name, version.version, "dataset", dataset)
     if git_sha:
         client.set_model_version_tag(model_name, version.version, "git_sha", git_sha)
+    if config_name:
+        # Which candidate config produced this version. The PR champion gate
+        # blocks only this lineage; baseline candidates compare informationally.
+        client.set_model_version_tag(model_name, version.version, "config", config_name)
     _set_stage(client, model_name, version.version, stage)
     return version
 
