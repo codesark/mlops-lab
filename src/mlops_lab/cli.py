@@ -10,8 +10,15 @@ from mlflow import MlflowClient
 from mlops_lab.config import Direction, ModelConfig, load_config
 from mlops_lab.deploy import mock_deploy
 from mlops_lab.evaluate import ComparisonResult, GateResult, check_gates, compare_to_champion
-from mlops_lab.registry import PRODUCTION, STAGING, get_champion_metrics, register_and_stage
+from mlops_lab.registry import (
+    PRODUCTION,
+    STAGING,
+    get_stage_version,
+    metrics_from_tags,
+    register_and_stage,
+)
 from mlops_lab.registry import promote as promote_stage
+from mlops_lab.registry import rollback as rollback_stage
 from mlops_lab.train import run_training
 
 app = typer.Typer(help="MLOps lab pipeline commands", add_completion=False)
@@ -56,8 +63,11 @@ def _render_markdown(
     metrics: dict[str, float],
     gate: GateResult,
     comparison: ComparisonResult | None,
+    comparison_blocking: bool = True,
+    champion_holder: str | None = None,
 ) -> str:
-    status = "✅ PASS" if gate.passed and (comparison is None or comparison.passed) else "❌ FAIL"
+    comparison_fails = comparison_blocking and comparison is not None and not comparison.passed
+    status = "✅ PASS" if gate.passed and not comparison_fails else "❌ FAIL"
     lines = [
         f"### `{cfg.name}` → `{cfg.registered_model}` — {status}",
         "",
@@ -78,8 +88,14 @@ def _render_markdown(
     if gate.failures:
         lines += ["", "**Gate failures:**"] + [f"- {f}" for f in gate.failures]
     if comparison is not None:
-        icon = "✅" if comparison.passed else "❌"
-        lines += ["", f"**Champion comparison:** {icon} {comparison.reason}"]
+        if comparison_blocking:
+            icon = "✅" if comparison.passed else "❌"
+            note = ""
+        else:
+            icon = "✅" if comparison.passed else "ℹ️"
+            holder = f"`{champion_holder}`" if champion_holder else "another candidate"
+            note = f" *(informational — champion is held by {holder})*"
+        lines += ["", f"**Champion comparison:** {icon} {comparison.reason}{note}"]
     return "\n".join(lines) + "\n"
 
 
@@ -99,18 +115,28 @@ def evaluate(
 
     gate = check_gates(result["metrics"], cfg.gates)
     comparison = None
+    comparison_blocking = False
+    champion_holder = None
     if champion_from_registry:
         _require_tracking_uri()
-        champion_metrics = get_champion_metrics(MlflowClient(), cfg.registered_model)
+        champion = get_stage_version(MlflowClient(), cfg.registered_model, PRODUCTION)
+        champion_metrics = metrics_from_tags(champion.tags) if champion else None
+        champion_holder = champion.tags.get("config") if champion else None
         comparison = compare_to_champion(result["metrics"], champion_metrics, cfg.champion)
+        # The champion gate blocks only the candidate lineage that holds the
+        # champion; baselines are expected to be worse and compare informationally.
+        comparison_blocking = champion_holder == cfg.name
 
-    report = _render_markdown(cfg, result["metrics"], gate, comparison)
+    report = _render_markdown(
+        cfg, result["metrics"], gate, comparison, comparison_blocking, champion_holder
+    )
     typer.echo(report)
     if output_md:
         output_md.parent.mkdir(parents=True, exist_ok=True)
         output_md.write_text(report)
 
-    if not gate.passed or (comparison is not None and not comparison.passed):
+    comparison_fails = comparison_blocking and comparison is not None and not comparison.passed
+    if not gate.passed or comparison_fails:
         raise typer.Exit(1)
 
 
@@ -156,6 +182,7 @@ def register(
         metrics=best["metrics"],
         dataset=best_cfg.dataset,
         git_sha=git_sha,
+        config_name=best_cfg.name,
     )
     typer.echo(
         f"registered {model} v{version.version} from {best_cfg.name} "
@@ -173,6 +200,19 @@ def promote(
     _require_tracking_uri()
     version = promote_stage(MlflowClient(), model, from_stage, to_stage)
     typer.echo(f"promoted {model} v{version.version}: {from_stage} → {to_stage}")
+
+
+@app.command()
+def rollback(
+    model: str = typer.Option(...),
+    to_version: str = typer.Option(..., help="Registry version number to make production again"),
+    reason: str = typer.Option(None, help="Why this rollback is happening (kept as a tag)"),
+    actor: str = typer.Option(None),
+) -> None:
+    """Move the production stage back to an earlier version. Pointer move — no retraining."""
+    _require_tracking_uri()
+    version = rollback_stage(MlflowClient(), model, to_version, actor=actor, reason=reason)
+    typer.echo(f"rolled back {model}: production → v{version.version}")
 
 
 @app.command()

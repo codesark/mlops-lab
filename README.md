@@ -32,6 +32,7 @@ secrets; see `scripts/azure_setup.sh` for the full one-time bootstrap.
 | CI | `.github/workflows/ci.yml` | On PRs: lint, tests, train each candidate, check gates, compare vs production champion, post metrics to the PR |
 | CD | `.github/workflows/cd.yml` | On merge: retrain, register best gate-passer per model, tag `stage=staging` |
 | Deploy | `.github/workflows/deploy.yml` | Dispatch: mock-deploy to staging, then **pause for manager approval**, tag `stage=production`, mock-deploy |
+| Rollback | `.github/workflows/rollback.yml` | Dispatch with model + version + reason: moves `stage=production` back to an earlier version (pointer move, no retraining) — same manager approval gate |
 | Azure bootstrap | `scripts/azure_setup.sh` | One-time: workspace, OIDC app + federated credentials, RBAC, repo variables |
 
 Two model families ship from this repo:
@@ -65,7 +66,7 @@ make train-all             # train all four candidates; runs appear in Studio �
 uv run mlops evaluate --config configs/housing_xgb.yaml   # check gates
 ```
 
-Offline? `make mlflow-up` starts a local throwaway MLflow at `http://127.0.0.1:5000`.
+Offline? `make mlflow-up` starts a local throwaway MLflow at `http://127.0.0.1:5050`.
 
 Notebooks (`make notebook`): `01_eda_and_baseline.ipynb` is the messy exploratory
 phase; `02_prototype_to_package.ipynb` shows the prototype→package handoff and
@@ -76,8 +77,10 @@ proves the package reproduces the ad-hoc experiment exactly.
 1. Edit a config (or add a new one) — e.g. bump `max_depth` in
    `configs/housing_xgb.yaml`.
 2. Open a PR. CI posts a metrics table per candidate: absolute gates plus a
-   comparison against the current production champion. A model that regresses past
-   tolerance fails the check and can't merge.
+   comparison against the current production champion. The champion comparison
+   **blocks only the candidate lineage that holds the champion** (regressing the
+   shipping model fails the check and can't merge); baseline candidates are
+   expected to be worse and compare informationally.
 3. Merge. CD registers the best gate-passing candidate and tags it `stage=staging`.
 4. Anyone runs the **Deploy** workflow (Actions → Deploy → Run workflow, pick the
    model). Staging deploys automatically; the production job waits until the
@@ -88,6 +91,12 @@ proves the package reproduces the ad-hoc experiment exactly.
 
 The production version's metrics become the champion baseline every future PR is
 compared against.
+
+**Rollback**: versions are immutable, so rolling back is a pointer move — run the
+**Rollback** workflow with the model, target version, and a reason. It requires the
+same production approval as a promotion, re-runs the mock deploy, and stamps
+`rollback.from/by/at/reason` tags on the restored version so Studio carries the
+audit trail.
 
 ## Deliberate simplifications
 
